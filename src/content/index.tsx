@@ -133,15 +133,22 @@ function injectUI(container: HTMLElement) {
 
   const host = document.createElement("div");
   host.id = HOST_ID;
-  host.style.display = "block";
-  host.style.marginTop = "8px";
+  host.style.display = "inline-flex";
+  host.style.alignItems = "center";
+  host.style.marginLeft = "8px";
   host.style.pointerEvents = "auto";
 
-  const insertionPoint = container.parentElement ?? container;
-  if (container.parentElement) {
-    container.insertAdjacentElement("afterend", host);
+  const root = container.closest("form") ?? container.parentElement ?? container;
+  const trailing =
+    root.querySelector<HTMLElement>('[class*="grid-area:trailing"]') ??
+    root.querySelector<HTMLElement>('[data-testid="send-button"]')?.parentElement ??
+    root.querySelector<HTMLElement>(".composer-submit-btn")?.parentElement ??
+    root;
+
+  if (trailing.firstChild) {
+    trailing.insertBefore(host, trailing.firstChild);
   } else {
-    insertionPoint.appendChild(host);
+    trailing.appendChild(host);
   }
 
   const shadow = host.attachShadow({ mode: "open" });
