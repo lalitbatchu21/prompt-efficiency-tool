@@ -1,0 +1,27 @@
+{
+  "name": "prompt-efficiency-tool",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "framer-motion": "latest",
+    "lucide-react": "^0.563.0",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.36",
+    "@types/node": "latest",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "latest",
+    "autoprefixer": "latest",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vite-plugin-static-copy": "^3.2.0"
+  }
+}
