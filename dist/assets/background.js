@@ -1,1 +1,1 @@
-console.log("Background service worker loaded");
+(function(){"use strict";console.log("Background service worker loaded")})();

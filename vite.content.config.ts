@@ -7,20 +7,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export default defineConfig({
-  base: "./",
   plugins: [react()],
+  define: {
+    "process.env.NODE_ENV": "\"production\"",
+    "process.env": "{}"
+  },
   build: {
     outDir: "dist",
-    emptyOutDir: true,
+    emptyOutDir: false,
+    lib: {
+      entry: resolve(__dirname, "src/content/index.tsx"),
+      name: "PromptEfficiencyContent",
+      formats: ["iife"],
+      fileName: () => "assets/content.js"
+    },
     rollupOptions: {
-      input: {
-        popup: resolve(__dirname, "popup.html")
-      },
-      output: {
-        entryFileNames: "assets/[name].js",
-        chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name][extname]"
-      },
       treeshake: "recommended"
     }
   }

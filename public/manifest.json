@@ -7,15 +7,13 @@
     "default_popup": "popup.html"
   },
   "background": {
-    "service_worker": "assets/background.js",
-    "type": "module"
+    "service_worker": "assets/background.js"
   },
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*"],
       "js": ["assets/content.js"],
-      "run_at": "document_idle",
-      "type": "module"
+      "run_at": "document_idle"
     }
   ]
 }

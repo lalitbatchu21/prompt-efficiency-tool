@@ -1,1 +1,3 @@
-console.log("Content script loaded");
+﻿// Deprecated stub to avoid JSX parse errors.
+// Entry moved to index.tsx.
+export {};
