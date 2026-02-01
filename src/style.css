@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply min-h-screen bg-neutral-950 text-white/90 antialiased;
+    background-image: radial-gradient(
+      900px 600px at 10% 0%,
+      rgba(255, 255, 255, 0.05),
+      transparent 60%
+    );
+  }
+}
