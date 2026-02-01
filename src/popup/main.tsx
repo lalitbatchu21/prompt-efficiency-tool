@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   Droplet,
@@ -8,9 +8,43 @@ import {
   Undo
 } from "lucide-react";
 import "../style.css";
+import { getStorage, setStorage } from "../utils/storage";
 
 function App() {
+  const [bottlesSaved, setBottlesSaved] = useState(0);
   const [undoEnabled, setUndoEnabled] = useState(true);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getStorage().then((state) => {
+      if (!mounted) return;
+      setBottlesSaved(state.bottlesSaved);
+      setUndoEnabled(state.undoEnabled);
+      setIsLoaded(true);
+    });
+
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string
+    ) => {
+      if (area !== "local") return;
+      if (changes.bottlesSaved) {
+        setBottlesSaved(changes.bottlesSaved.newValue ?? 0);
+      }
+      if (changes.undoEnabled) {
+        setUndoEnabled(Boolean(changes.undoEnabled.newValue));
+      }
+    };
+
+    chrome.storage.onChanged.addListener(listener);
+
+    return () => {
+      mounted = false;
+      chrome.storage.onChanged.removeListener(listener);
+    };
+  }, []);
 
   const toggleTrackClasses = undoEnabled
     ? "border-emerald-300/60 bg-emerald-400/50"
@@ -18,6 +52,18 @@ function App() {
   const toggleKnobClasses = undoEnabled
     ? "translate-x-5 bg-white"
     : "translate-x-0 bg-white/60";
+  const bottlesLabel =
+    bottlesSaved === 1 ? "1 bottle saved" : `${bottlesSaved} bottles saved`;
+
+  if (!isLoaded) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <div className="w-80 rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 via-white/5 to-transparent p-5 text-xs uppercase tracking-wide text-white/50 shadow-2xl shadow-[inset_1px_1px_0_rgba(255,255,255,0.16)] backdrop-blur-xl">
+          Loading...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
@@ -30,14 +76,18 @@ function App() {
             </h1>
           </div>
           <span className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] uppercase tracking-wide text-white/60">
-            0 bottles saved
+            {bottlesLabel}
           </span>
         </header>
 
         <section className="mt-5 border-t border-white/10 pt-4">
           <button
             className="flex w-full items-center justify-between"
-            onClick={() => setUndoEnabled((value) => !value)}
+            onClick={() => {
+              const next = !undoEnabled;
+              setUndoEnabled(next);
+              void setStorage({ undoEnabled: next });
+            }}
             type="button"
             aria-pressed={undoEnabled}
             aria-label="Enable Undo"
