@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Droplet, Undo } from "lucide-react";
 import { getPromptValue, setPromptValue } from "../utils/domUtils";
+import { logEcoStats, processSavings } from "../utils/ecoStats";
 import { getStorage } from "../utils/storage";
 
 export default function Injection() {
@@ -8,6 +9,52 @@ export default function Injection() {
   const [undoEnabled, setUndoEnabled] = useState(true);
   const [status, setStatus] = useState<"idle" | "success">("idle");
   const [undoSpinning, setUndoSpinning] = useState(false);
+
+  const stopWords = new Set([
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "is",
+    "are",
+    "was",
+    "were",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with"
+  ]);
+
+  const handleCompress = () => {
+    const originalText = getPromptValue();
+    console.log(`Read: ${originalText}`);
+    lastPromptRef.current = originalText;
+
+    const words = originalText.split(/\s+/).filter(Boolean);
+    const filtered = words.filter((word) => !stopWords.has(word.toLowerCase()));
+    const compressedText = filtered.join(" ");
+
+    const savings = processSavings(originalText, compressedText);
+    console.log(
+      "Compressed:",
+      originalText.length,
+      "->",
+      compressedText.length,
+      "Savings:",
+      savings
+    );
+
+    setPromptValue(compressedText);
+    void logEcoStats(savings);
+
+    setStatus("success");
+    window.setTimeout(() => setStatus("idle"), 2000);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -81,14 +128,7 @@ export default function Injection() {
           className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${
             status === "success" ? "text-emerald-400" : "text-zinc-400"
           }`}
-          onClick={() => {
-            const text = getPromptValue();
-            console.log(`Read: ${text}`);
-            lastPromptRef.current = text;
-            setPromptValue(`${text} [Verified]`);
-            setStatus("success");
-            window.setTimeout(() => setStatus("idle"), 2000);
-          }}
+          onClick={handleCompress}
         >
           {status === "success" ? <Check className="h-4 w-4" /> : <Droplet className="h-4 w-4" />}
           {status === "success" ? "Saved" : "Compress"}

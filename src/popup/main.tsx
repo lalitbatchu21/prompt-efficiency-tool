@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   Droplet,
   ExternalLink,
+  Github,
   Mail,
   PlayCircle,
   Undo
@@ -14,6 +15,9 @@ function App() {
   const [bottlesSaved, setBottlesSaved] = useState(0);
   const [undoEnabled, setUndoEnabled] = useState(true);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [totalTokens, setTotalTokens] = useState(0);
+  const [totalWater, setTotalWater] = useState(0);
+  const [totalEnergy, setTotalEnergy] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -25,6 +29,16 @@ function App() {
       setIsLoaded(true);
     });
 
+    chrome.storage.local.get(
+      { totalTokens: 0, totalWater: 0, totalEnergy: 0 },
+      (items) => {
+        if (!mounted) return;
+        setTotalTokens(Number(items.totalTokens ?? 0));
+        setTotalWater(Number(items.totalWater ?? 0));
+        setTotalEnergy(Number(items.totalEnergy ?? 0));
+      }
+    );
+
     const listener = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: string
@@ -35,6 +49,15 @@ function App() {
       }
       if (changes.undoEnabled) {
         setUndoEnabled(Boolean(changes.undoEnabled.newValue));
+      }
+      if (changes.totalTokens) {
+        setTotalTokens(Number(changes.totalTokens.newValue ?? 0));
+      }
+      if (changes.totalWater) {
+        setTotalWater(Number(changes.totalWater.newValue ?? 0));
+      }
+      if (changes.totalEnergy) {
+        setTotalEnergy(Number(changes.totalEnergy.newValue ?? 0));
       }
     };
 
@@ -52,8 +75,17 @@ function App() {
   const toggleKnobClasses = undoEnabled
     ? "translate-x-5 bg-white"
     : "translate-x-0 bg-white/60";
+  const bottleMl = 500;
+  const bottlesFromWater = totalWater / bottleMl;
   const bottlesLabel =
-    bottlesSaved === 1 ? "1 bottle saved" : `${bottlesSaved} bottles saved`;
+    bottlesFromWater === 1
+      ? "1.00 bottle saved"
+      : `${bottlesFromWater.toFixed(2)} bottles saved`;
+  const phoneCharges = totalEnergy / 12;
+  const chargesLabel =
+    phoneCharges === 1
+      ? "1 phone charge"
+      : `${phoneCharges.toFixed(1)} phone charges`;
 
   if (!isLoaded) {
     return (
@@ -75,9 +107,14 @@ function App() {
               Prompt Efficiency Tool
             </h1>
           </div>
-          <span className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] uppercase tracking-wide text-white/60">
-            {bottlesLabel}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] uppercase tracking-wide text-white/60">
+              {bottlesLabel}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] uppercase tracking-wide text-white/60">
+              {chargesLabel}
+            </span>
+          </div>
         </header>
 
         <section className="mt-5 border-t border-white/10 pt-4">
@@ -111,6 +148,38 @@ function App() {
           </button>
         </section>
 
+        <section className="mt-5 border-t border-white/10 pt-4">
+          <p className="text-xs uppercase tracking-wide text-white/50">
+            Eco stats
+          </p>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-white/70">
+            <div className="rounded-lg border border-white/10 bg-white/5 p-2">
+              <p className="text-[10px] uppercase tracking-wide text-white/40">
+                Tokens
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white/90">
+                {Math.round(totalTokens)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/5 p-2">
+              <p className="text-[10px] uppercase tracking-wide text-white/40">
+                Water
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white/90">
+                {totalWater.toFixed(1)} ml
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/5 p-2">
+              <p className="text-[10px] uppercase tracking-wide text-white/40">
+                Energy
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white/90">
+                {totalEnergy.toFixed(2)} Wh
+              </p>
+            </div>
+          </div>
+        </section>
+
         <footer className="mt-5 border-t border-white/10 pt-4 text-xs text-white/60">
           <div className="flex items-center gap-2">
             <Mail className="h-4 w-4 text-white/50" />
@@ -121,15 +190,17 @@ function App() {
               className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-white/70 transition hover:bg-white/20 hover:text-white/90"
               href="#"
             >
-              <PlayCircle className="h-4 w-4" />
-              Watch Tutorial
+              <ExternalLink className="h-4 w-4" />
+              Visit Website
             </a>
             <a
               className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-white/70 transition hover:bg-white/20 hover:text-white/90"
-              href="#"
+              href="https://github.com/lalitbatchu21/prompt-efficiency-tool"
+              target="_blank"
+              rel="noreferrer"
             >
-              <ExternalLink className="h-4 w-4" />
-              Visit Website
+              <Github className="h-4 w-4" />
+              Open Source
             </a>
           </div>
         </footer>
