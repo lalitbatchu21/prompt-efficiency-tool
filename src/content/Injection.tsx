@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Droplet, Undo } from "lucide-react";
 import { getPromptValue, setPromptValue } from "../utils/domUtils";
+import { getGeminiPromptValue, setGeminiPromptValue } from "../utils/geminiDomUtils";
 import { logEcoStats, processSavings } from "../utils/ecoStats";
 import { getStorage } from "../utils/storage";
+
+const HOSTNAME = window.location.hostname;
+const IS_GEMINI = HOSTNAME === "gemini.google.com";
 
 export default function Injection() {
   const lastPromptRef = useRef<string | null>(null);
@@ -30,8 +34,17 @@ export default function Injection() {
     "with"
   ]);
 
+  const readPrompt = () => (IS_GEMINI ? getGeminiPromptValue() : getPromptValue());
+  const writePrompt = (value: string) => {
+    if (IS_GEMINI) {
+      setGeminiPromptValue(value);
+    } else {
+      setPromptValue(value);
+    }
+  };
+
   const handleCompress = () => {
-    const originalText = getPromptValue();
+    const originalText = readPrompt();
     console.log(`Read: ${originalText}`);
     lastPromptRef.current = originalText;
 
@@ -49,7 +62,7 @@ export default function Injection() {
       savings
     );
 
-    setPromptValue(compressedText);
+    writePrompt(compressedText);
     void logEcoStats(savings);
 
     setStatus("success");
@@ -149,15 +162,15 @@ export default function Injection() {
               const previous = lastPromptRef.current;
               if (previous !== null) {
                 console.log("Undo: restoring previous prompt");
-                setPromptValue(previous);
+                writePrompt(previous);
                 return;
               }
 
-              const current = getPromptValue();
+              const current = readPrompt();
               if (current.endsWith(" [Verified]")) {
                 const restored = current.replace(/\\s\\[Verified\\]$/, "");
                 console.log("Undo: stripping verified suffix");
-                setPromptValue(restored);
+                writePrompt(restored);
               } else {
                 console.log("Undo: no previous prompt captured");
               }

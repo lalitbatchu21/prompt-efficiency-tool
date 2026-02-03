@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import Injection from "./Injection";
+import { findGeminiEditable } from "../utils/geminiDomUtils";
 import css from "../style.css?inline";
 
 console.log("Prompt Efficiency Tool: Content script loaded");
@@ -12,13 +13,19 @@ let debugLogged = false;
 
 const HOST_ID = "prompt-efficiency-root";
 
-const TEXTAREA_SELECTORS = [
+const HOSTNAME = window.location.hostname;
+const IS_CHATGPT = HOSTNAME === "chatgpt.com" || HOSTNAME.endsWith(".chatgpt.com");
+const IS_GEMINI = HOSTNAME === "gemini.google.com";
+const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI;
+const SITE_LABEL = IS_GEMINI ? "Gemini" : IS_CHATGPT ? "ChatGPT" : "Unknown";
+
+const CHATGPT_TEXTAREA_SELECTORS = [
   'textarea#prompt-textarea',
   'textarea[data-testid="prompt-textarea"]',
   'textarea[name="prompt-textarea"]'
 ];
 
-const EDITABLE_SELECTORS = [
+const CHATGPT_EDITABLE_SELECTORS = [
   'div#prompt-textarea[contenteditable="true"]',
   'div[contenteditable="true"][data-testid="prompt-textarea"]',
   'div[contenteditable="true"][aria-label="Message"]',
@@ -43,7 +50,12 @@ function querySelectorDeep<T extends Element>(root: ParentNode, selectors: strin
   return null;
 }
 
-function findPromptContainer(): HTMLElement | null {
+type InjectionTarget = {
+  parent: HTMLElement;
+  insertBefore?: ChildNode | null;
+};
+
+function findChatGPTPromptContainer(): HTMLElement | null {
   const directPrompt = document.querySelector<HTMLElement>("#prompt-textarea");
   if (directPrompt) {
     return (
@@ -53,7 +65,10 @@ function findPromptContainer(): HTMLElement | null {
     );
   }
 
-  const textarea = querySelectorDeep<HTMLTextAreaElement>(document, TEXTAREA_SELECTORS);
+  const textarea = querySelectorDeep<HTMLTextAreaElement>(
+    document,
+    CHATGPT_TEXTAREA_SELECTORS
+  );
   if (textarea) {
     return (
       textarea.closest('[class*="prosemirror-parent"]') ??
@@ -62,7 +77,10 @@ function findPromptContainer(): HTMLElement | null {
     );
   }
 
-  const contentEditable = querySelectorDeep<HTMLElement>(document, EDITABLE_SELECTORS);
+  const contentEditable = querySelectorDeep<HTMLElement>(
+    document,
+    CHATGPT_EDITABLE_SELECTORS
+  );
   if (contentEditable) {
     return (
       contentEditable.closest('[class*="prosemirror-parent"]') ??
@@ -74,25 +92,84 @@ function findPromptContainer(): HTMLElement | null {
   return null;
 }
 
+function resolveChatGPTTarget(): InjectionTarget | null {
+  const container = findChatGPTPromptContainer();
+  if (!container) return null;
+
+  const root = container.closest("form") ?? container.parentElement ?? container;
+  const trailing =
+    root.querySelector<HTMLElement>('[class*="grid-area:trailing"]') ??
+    root.querySelector<HTMLElement>('[data-testid="send-button"]')?.parentElement ??
+    root.querySelector<HTMLElement>(".composer-submit-btn")?.parentElement ??
+    root;
+
+  return { parent: trailing, insertBefore: trailing.firstChild };
+}
+
+function resolveGeminiTarget(): InjectionTarget | null {
+  const sendButton = querySelectorDeep<HTMLButtonElement>(document, [
+    'button[aria-label="Send message"]'
+  ]);
+
+  if (sendButton) {
+    const container =
+      sendButton.closest<HTMLElement>('div[class*="send-button-container"]') ??
+      sendButton.parentElement;
+    if (container) {
+      return { parent: container, insertBefore: sendButton };
+    }
+  }
+
+  const sendContainer = querySelectorDeep<HTMLElement>(document, [
+    'div[class*="send-button-container"]'
+  ]);
+  if (sendContainer) {
+    return { parent: sendContainer, insertBefore: sendContainer.firstChild };
+  }
+
+  const editable = findGeminiEditable();
+  if (!editable) return null;
+
+  const wrapper =
+    (editable.closest("rich-textarea") as HTMLElement | null) ??
+    (editable.closest("form") as HTMLElement | null) ??
+    editable.parentElement;
+  if (!wrapper) return null;
+
+  return { parent: wrapper, insertBefore: wrapper.firstChild };
+}
+
+function resolveInjectionTarget(): InjectionTarget | null {
+  if (IS_CHATGPT) return resolveChatGPTTarget();
+  if (IS_GEMINI) return resolveGeminiTarget();
+  return null;
+}
+
 function handleScan() {
   scheduled = false;
 
-  const container = findPromptContainer();
-  if (!container && !debugLogged) {
+  const target = resolveInjectionTarget();
+  if (!target && !debugLogged) {
     debugLogged = true;
-    const promptEl = document.querySelector("#prompt-textarea");
+    const promptEl = IS_GEMINI
+      ? findGeminiEditable()
+      : querySelectorDeep<HTMLElement>(document, [
+          ...CHATGPT_TEXTAREA_SELECTORS,
+          ...CHATGPT_EDITABLE_SELECTORS
+        ]);
     console.log("Prompt Efficiency Tool: Target not found yet", {
+      site: SITE_LABEL,
       promptElementFound: Boolean(promptEl)
     });
   }
-  if (!container) return;
+  if (!target) return;
 
   if (!targetLogged) {
     targetLogged = true;
-    console.log("Prompt Efficiency Tool: Target found");
+    console.log("Prompt Efficiency Tool: Target found", { site: SITE_LABEL });
   }
 
-  injectUI(container);
+  injectUI(target);
 }
 
 function scheduleScan() {
@@ -111,20 +188,24 @@ const observer = new MutationObserver((mutations) => {
   }
 });
 
-observer.observe(document.body, {
-  childList: true,
-  subtree: true
-});
+if (IS_SUPPORTED) {
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 
-scheduleScan();
+  scheduleScan();
 
-if (pollId === null) {
-  pollId = window.setInterval(() => {
-    scheduleScan();
-  }, 1000);
+  if (pollId === null) {
+    pollId = window.setInterval(() => {
+      scheduleScan();
+    }, 1000);
+  }
+} else {
+  console.log("Prompt Efficiency Tool: Unsupported host", { host: HOSTNAME });
 }
 
-function injectUI(container: HTMLElement) {
+function injectUI(target: InjectionTarget) {
   const existing = document.getElementById(HOST_ID);
   if (existing && existing.isConnected) return;
   if (existing && !existing.isConnected) {
@@ -138,17 +219,14 @@ function injectUI(container: HTMLElement) {
   host.style.marginLeft = "8px";
   host.style.pointerEvents = "auto";
 
-  const root = container.closest("form") ?? container.parentElement ?? container;
-  const trailing =
-    root.querySelector<HTMLElement>('[class*="grid-area:trailing"]') ??
-    root.querySelector<HTMLElement>('[data-testid="send-button"]')?.parentElement ??
-    root.querySelector<HTMLElement>(".composer-submit-btn")?.parentElement ??
-    root;
-
-  if (trailing.firstChild) {
-    trailing.insertBefore(host, trailing.firstChild);
+  const parent = target.parent;
+  const insertBefore = target.insertBefore ?? null;
+  if (insertBefore && insertBefore.parentElement === parent) {
+    parent.insertBefore(host, insertBefore);
+  } else if (parent.firstChild) {
+    parent.insertBefore(host, parent.firstChild);
   } else {
-    trailing.appendChild(host);
+    parent.appendChild(host);
   }
 
   const shadow = host.attachShadow({ mode: "open" });
