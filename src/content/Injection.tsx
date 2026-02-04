@@ -95,8 +95,10 @@ export default function Injection() {
     };
   }, []);
 
-    return (
-      <div className="pointer-events-auto flex items-center gap-1 pet-fade-in">
+  const geminiClass = IS_GEMINI ? "eco-btn-gemini" : "";
+
+  return (
+    <div className="pointer-events-auto flex items-center gap-1 pet-fade-in">
       <style>{`
         .pet-fade-in {
           animation: pet-fade-in 240ms ease-out;
@@ -138,7 +140,7 @@ export default function Injection() {
       <div className="relative pet-group">
         <button
           type="button"
-          className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${
+          className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${
             status === "success" ? "text-emerald-400" : "text-zinc-400"
           }`}
           onClick={handleCompress}
@@ -155,7 +157,7 @@ export default function Injection() {
         <div className="relative pet-group">
           <button
             type="button"
-            className="pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100"
+            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass}`}
             onClick={() => {
               setUndoSpinning(true);
               window.setTimeout(() => setUndoSpinning(false), 400);
