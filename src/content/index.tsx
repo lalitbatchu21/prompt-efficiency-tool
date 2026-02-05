@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import Injection from "./Injection";
 import { findGeminiEditable } from "../utils/geminiDomUtils";
 import css from "../style.css?inline";
+import contentCss from "./styles.css?inline";
 
 console.log("Prompt Efficiency Tool: Content script loaded");
 
@@ -16,8 +17,15 @@ const HOST_ID = "prompt-efficiency-root";
 const HOSTNAME = window.location.hostname;
 const IS_CHATGPT = HOSTNAME === "chatgpt.com" || HOSTNAME.endsWith(".chatgpt.com");
 const IS_GEMINI = HOSTNAME === "gemini.google.com";
-const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI;
-const SITE_LABEL = IS_GEMINI ? "Gemini" : IS_CHATGPT ? "ChatGPT" : "Unknown";
+const IS_CLAUDE = HOSTNAME === "claude.ai" || HOSTNAME.endsWith(".claude.ai");
+const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI || IS_CLAUDE;
+const SITE_LABEL = IS_GEMINI
+  ? "Gemini"
+  : IS_CHATGPT
+    ? "ChatGPT"
+    : IS_CLAUDE
+      ? "Claude"
+      : "Unknown";
 
 const CHATGPT_TEXTAREA_SELECTORS = [
   'textarea#prompt-textarea',
@@ -139,9 +147,37 @@ function resolveGeminiTarget(): InjectionTarget | null {
   return { parent: wrapper, insertBefore: wrapper.firstChild };
 }
 
+function resolveClaudeTarget(): InjectionTarget | null {
+  const sendContainer = querySelectorDeep<HTMLElement>(document, [
+    'div[class*="overflow-hidden"][class*="shrink-0"][class*="p-1"]'
+  ]);
+  if (sendContainer) {
+    const sendButton = sendContainer.querySelector<HTMLElement>("button");
+    return { parent: sendContainer, insertBefore: sendButton ?? sendContainer.firstChild };
+  }
+
+  const sendButton = querySelectorDeep<HTMLButtonElement>(document, [
+    'button[aria-label*="Send"]',
+    'button[data-testid*="send"]',
+    'button[type="submit"]'
+  ]);
+  if (sendButton) {
+    const container = sendButton.parentElement ?? sendButton;
+    return { parent: container, insertBefore: sendButton };
+  }
+
+  const editor = querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]']);
+  if (!editor) return null;
+  const wrapper = (editor.closest("form") as HTMLElement | null) ?? editor.parentElement;
+  if (!wrapper) return null;
+
+  return { parent: wrapper, insertBefore: wrapper.firstChild };
+}
+
 function resolveInjectionTarget(): InjectionTarget | null {
   if (IS_CHATGPT) return resolveChatGPTTarget();
   if (IS_GEMINI) return resolveGeminiTarget();
+  if (IS_CLAUDE) return resolveClaudeTarget();
   return null;
 }
 
@@ -153,10 +189,12 @@ function handleScan() {
     debugLogged = true;
     const promptEl = IS_GEMINI
       ? findGeminiEditable()
-      : querySelectorDeep<HTMLElement>(document, [
-          ...CHATGPT_TEXTAREA_SELECTORS,
-          ...CHATGPT_EDITABLE_SELECTORS
-        ]);
+      : IS_CLAUDE
+        ? querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]'])
+        : querySelectorDeep<HTMLElement>(document, [
+            ...CHATGPT_TEXTAREA_SELECTORS,
+            ...CHATGPT_EDITABLE_SELECTORS
+          ]);
     console.log("Prompt Efficiency Tool: Target not found yet", {
       site: SITE_LABEL,
       promptElementFound: Boolean(promptEl)
@@ -231,7 +269,7 @@ function injectUI(target: InjectionTarget) {
 
   const shadow = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
-  style.textContent = css;
+  style.textContent = `${css}\n${contentCss}`;
 
   const mount = document.createElement("div");
   shadow.append(style, mount);
