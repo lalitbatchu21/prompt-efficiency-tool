@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "manifest_version": 3,
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["https://*.workers.dev/*", "https://claude.ai/*", "https://grok.com/*"],
+  "host_permissions": [
+    "https://*.workers.dev/*",
+    "https://claude.ai/*",
+    "https://grok.com/*",
+    "https://chat.deepseek.com/*"
+  ],
   "action": {
     "default_popup": "popup.html"
   },
@@ -16,7 +21,8 @@
         "https://chatgpt.com/*",
         "https://gemini.google.com/*",
         "https://claude.ai/*",
-        "https://grok.com/*"
+        "https://grok.com/*",
+        "https://chat.deepseek.com/*"
       ],
       "js": ["assets/content.js"],
       "run_at": "document_idle"

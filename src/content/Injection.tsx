@@ -9,6 +9,7 @@ const HOSTNAME = window.location.hostname;
 const IS_GEMINI = HOSTNAME === "gemini.google.com";
 const IS_CLAUDE = HOSTNAME.includes("claude.ai");
 const IS_GROK = HOSTNAME === "grok.com" || HOSTNAME.endsWith(".grok.com");
+const IS_DEEPSEEK = HOSTNAME === "chat.deepseek.com";
 
 export default function Injection() {
   const lastPromptRef = useRef<string | null>(null);
@@ -85,6 +86,17 @@ export default function Injection() {
       'div[contenteditable="true"][role="textbox"]',
       'div[contenteditable="true"][data-slate-editor="true"]',
       'div[contenteditable="true"][data-lexical-editor="true"]',
+      'div[contenteditable="true"]'
+    ];
+    const scoped = findEditorNearHost<HTMLElement>(selectors);
+    if (scoped) return scoped;
+    return querySelectorDeep<HTMLElement>(document, selectors);
+  };
+
+  const getDeepSeekEditor = (): HTMLElement | HTMLTextAreaElement | null => {
+    const selectors = [
+      "textarea",
+      'div[contenteditable="true"][role="textbox"]',
       'div[contenteditable="true"]'
     ];
     const scoped = findEditorNearHost<HTMLElement>(selectors);
@@ -186,6 +198,18 @@ export default function Injection() {
     return editor.innerText ?? editor.textContent ?? "";
   };
 
+  const readDeepSeekPrompt = () => {
+    const editor = getDeepSeekEditor();
+    if (!editor) {
+      console.warn("Prompt Efficiency Tool: DeepSeek editor not found");
+      return "";
+    }
+    if (editor instanceof HTMLTextAreaElement) {
+      return editor.value ?? "";
+    }
+    return editor.innerText ?? editor.textContent ?? "";
+  };
+
   const writeGrokPrompt = (value: string) => {
     const editor = getGrokEditor();
     if (!editor) {
@@ -266,17 +290,86 @@ export default function Injection() {
     }
   };
 
+  const writeDeepSeekPrompt = (value: string) => {
+    const editor = getDeepSeekEditor();
+    if (!editor) {
+      console.warn("Prompt Efficiency Tool: DeepSeek editor not found");
+      return;
+    }
+
+    if (editor instanceof HTMLTextAreaElement) {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      );
+      const setter = descriptor?.set;
+      if (setter) {
+        setter.call(editor, value);
+      } else {
+        editor.value = value;
+      }
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+      editor.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    try {
+      editor.focus();
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        selection.addRange(range);
+      }
+
+      document.execCommand("selectAll", false);
+      document.execCommand("delete", false);
+
+      if (value.length === 0) {
+        const clearEvent =
+          typeof InputEvent !== "undefined"
+            ? new InputEvent("input", {
+                bubbles: true,
+                cancelable: true,
+                inputType: "deleteContentBackward"
+              })
+            : new Event("input", { bubbles: true });
+        editor.dispatchEvent(clearEvent);
+        return;
+      }
+
+      document.execCommand("insertText", false, value);
+      const inputEvent =
+        typeof InputEvent !== "undefined"
+          ? new InputEvent("input", {
+              bubbles: true,
+              cancelable: true,
+              inputType: "insertText",
+              data: value
+            })
+          : new Event("input", { bubbles: true });
+      editor.dispatchEvent(inputEvent);
+    } catch {
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
+
   const readPrompt = () =>
     IS_GROK
       ? readGrokPrompt()
-      : IS_CLAUDE
-        ? readClaudePrompt()
-        : IS_GEMINI
-          ? getGeminiPromptValue()
-          : getPromptValue();
+      : IS_DEEPSEEK
+        ? readDeepSeekPrompt()
+        : IS_CLAUDE
+          ? readClaudePrompt()
+          : IS_GEMINI
+            ? getGeminiPromptValue()
+            : getPromptValue();
   const writePrompt = (value: string) => {
     if (IS_GROK) {
       writeGrokPrompt(value);
+    } else if (IS_DEEPSEEK) {
+      writeDeepSeekPrompt(value);
     } else if (IS_CLAUDE) {
       writeClaudePrompt(value);
     } else if (IS_GEMINI) {
@@ -382,6 +475,8 @@ export default function Injection() {
   const geminiClass = IS_GEMINI ? "eco-btn-gemini" : "";
   const claudeClass = IS_CLAUDE ? "eco-btn-claude" : "";
   const grokClass = IS_GROK ? "eco-btn-grok" : "";
+  const deepseekClass = IS_DEEPSEEK ? "eco-btn-deepseek" : "";
+  const showCustomTooltip = !IS_DEEPSEEK;
 
   return (
     <div className="pointer-events-auto flex items-center gap-1 pet-fade-in">
@@ -396,6 +491,10 @@ export default function Injection() {
         .pet-ghost {
           position: relative;
           overflow: hidden;
+        }
+        .pet-group {
+          position: relative;
+          overflow: visible;
         }
         .pet-ghost::after {
           content: "";
@@ -413,6 +512,9 @@ export default function Injection() {
           opacity: 0;
           transform: translateY(4px);
           transition: opacity 160ms ease, transform 160ms ease;
+          white-space: nowrap;
+          max-width: none;
+          z-index: 9999;
         }
         .pet-group:hover .pet-tooltip {
           opacity: 1;
@@ -426,24 +528,27 @@ export default function Injection() {
       <div className="relative pet-group">
         <button
           type="button"
-          className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${
+          className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${deepseekClass} ${
             status === "success" ? "text-emerald-400" : "text-zinc-400"
           }`}
           onClick={handleCompress}
+          title="Compress prompt"
         >
           {status === "success" ? <Check className="h-4 w-4" /> : <Droplet className="h-4 w-4" />}
           {status === "success" ? "Saved" : "Compress"}
         </button>
-        <div className="pet-tooltip absolute -top-8 left-1/2 -translate-x-1/2 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] uppercase tracking-wide text-white/80 shadow-lg">
-          Compress prompt
-        </div>
+        {showCustomTooltip ? (
+          <div className="pet-tooltip absolute -top-8 left-1/2 -translate-x-1/2 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] uppercase tracking-wide text-white/80 shadow-lg">
+            Compress prompt
+          </div>
+        ) : null}
       </div>
 
       {undoEnabled ? (
         <div className="relative pet-group">
           <button
             type="button"
-            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass}`}
+            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${deepseekClass}`}
             onClick={() => {
               setUndoSpinning(true);
               window.setTimeout(() => setUndoSpinning(false), 400);
@@ -463,13 +568,16 @@ export default function Injection() {
                 console.log("Undo: no previous prompt captured");
               }
             }}
+            title="Restore last prompt"
           >
             <Undo className={`h-4 w-4 transition-transform duration-300 ${undoSpinning ? "rotate-360" : ""}`} />
             Undo
           </button>
-          <div className="pet-tooltip absolute -top-8 left-1/2 -translate-x-1/2 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] uppercase tracking-wide text-white/80 shadow-lg">
-            Restore last prompt
-          </div>
+          {showCustomTooltip ? (
+            <div className="pet-tooltip absolute -top-8 left-1/2 -translate-x-1/2 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] uppercase tracking-wide text-white/80 shadow-lg">
+              Restore last prompt
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

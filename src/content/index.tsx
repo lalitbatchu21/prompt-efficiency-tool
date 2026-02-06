@@ -20,7 +20,8 @@ const IS_CHATGPT = HOSTNAME === "chatgpt.com" || HOSTNAME.endsWith(".chatgpt.com
 const IS_GEMINI = HOSTNAME === "gemini.google.com";
 const IS_CLAUDE = HOSTNAME === "claude.ai" || HOSTNAME.endsWith(".claude.ai");
 const IS_GROK = HOSTNAME === "grok.com" || HOSTNAME.endsWith(".grok.com");
-const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI || IS_CLAUDE || IS_GROK;
+const IS_DEEPSEEK = HOSTNAME === "chat.deepseek.com";
+const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI || IS_CLAUDE || IS_GROK || IS_DEEPSEEK;
 const SITE_LABEL = IS_GEMINI
   ? "Gemini"
   : IS_CHATGPT
@@ -29,7 +30,9 @@ const SITE_LABEL = IS_GEMINI
       ? "Claude"
       : IS_GROK
         ? "Grok"
-        : "Unknown";
+        : IS_DEEPSEEK
+          ? "DeepSeek"
+          : "Unknown";
 
 const CHATGPT_TEXTAREA_SELECTORS = [
   'textarea#prompt-textarea',
@@ -218,6 +221,73 @@ function resolveGrokTarget(): InjectionTarget | null {
   return { parent: wrapper, insertBefore: wrapper.firstChild };
 }
 
+function resolveDeepSeekTarget(): InjectionTarget | null {
+  const editor = querySelectorDeep<HTMLTextAreaElement>(document, [
+    'textarea[placeholder*="DeepSeek"]',
+    "textarea"
+  ]);
+  if (editor) {
+    let scope: HTMLElement | null = editor.parentElement;
+    while (scope && scope !== document.body) {
+      const hasIcon = scope.querySelector(
+        'div[class*="ds-icon-button--sizing-container"]'
+      );
+      const hasToggle = scope.querySelector('div[class*="ds-toggle-button"]');
+      if (hasIcon && hasToggle) break;
+      scope = scope.parentElement;
+    }
+    if (scope) {
+      const scopedIcon = scope.querySelector<HTMLElement>(
+        'div[class*="ds-icon-button--sizing-container"]'
+      );
+      if (scopedIcon) {
+        const row =
+          scopedIcon.parentElement ??
+          scopedIcon.closest<HTMLElement>('[class*="flex"][class*="items-center"]') ??
+          scopedIcon.closest<HTMLElement>("div");
+        if (row && row !== scopedIcon) {
+          return { parent: row, insertBefore: scopedIcon };
+        }
+      }
+    }
+  }
+
+  const iconButton = querySelectorDeep<HTMLElement>(document, [
+    'div[class*="ds-icon-button--sizing-container"]',
+    'div[class*="ds-icon-button"]'
+  ]);
+  if (iconButton) {
+    const row =
+      iconButton.parentElement ??
+      iconButton.closest<HTMLElement>('[class*="flex"][class*="items-center"]') ??
+      iconButton.closest<HTMLElement>("div");
+    if (row && row !== iconButton) {
+      return { parent: row, insertBefore: iconButton };
+    }
+  }
+
+  const sendButton = querySelectorDeep<HTMLElement>(document, [
+    'button[aria-label*="Send"]',
+    'button[type="submit"]'
+  ]);
+  if (sendButton) {
+    const container = sendButton.parentElement ?? sendButton;
+    return { parent: container, insertBefore: sendButton };
+  }
+
+  const fallbackEditor = querySelectorDeep<HTMLElement>(document, [
+    "textarea",
+    'div[contenteditable="true"]'
+  ]);
+  if (!fallbackEditor) return null;
+  const wrapper =
+    (fallbackEditor.closest("form") as HTMLElement | null) ??
+    fallbackEditor.parentElement;
+  if (!wrapper) return null;
+
+  return { parent: wrapper, insertBefore: wrapper.firstChild };
+}
+
 function findGrokPaddingContainer(row: HTMLElement) {
   return (
     row.closest<HTMLElement>('div[style*="padding-inline-end"]') ??
@@ -266,6 +336,7 @@ function resolveInjectionTarget(): InjectionTarget | null {
   if (IS_GEMINI) return resolveGeminiTarget();
   if (IS_CLAUDE) return resolveClaudeTarget();
   if (IS_GROK) return resolveGrokTarget();
+  if (IS_DEEPSEEK) return resolveDeepSeekTarget();
   return null;
 }
 
@@ -277,7 +348,7 @@ function handleScan() {
     debugLogged = true;
     const promptEl = IS_GEMINI
       ? findGeminiEditable()
-      : IS_CLAUDE || IS_GROK
+      : IS_CLAUDE || IS_GROK || IS_DEEPSEEK
         ? querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]', "textarea"])
         : querySelectorDeep<HTMLElement>(document, [
             ...CHATGPT_TEXTAREA_SELECTORS,
@@ -345,6 +416,9 @@ function injectUI(target: InjectionTarget) {
   if (IS_GROK) {
     host.style.marginRight = "8px";
     host.style.alignSelf = "center";
+  } else if (IS_DEEPSEEK) {
+    host.style.marginLeft = "6px";
+    host.style.overflow = "visible";
   } else {
     host.style.marginLeft = "8px";
   }
@@ -353,6 +427,8 @@ function injectUI(target: InjectionTarget) {
   const parent = target.parent;
   if (IS_GROK) {
     ensureGrokPadding(parent);
+  } else if (IS_DEEPSEEK) {
+    parent.style.overflow = "visible";
   }
   const insertBefore = target.insertBefore ?? null;
   if (insertBefore && insertBefore.parentElement === parent) {

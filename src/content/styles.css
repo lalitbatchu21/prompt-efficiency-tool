@@ -68,3 +68,40 @@
   fill: currentColor !important;
   stroke: currentColor !important;
 }
+
+.eco-btn-deepseek {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 30px !important;
+  padding: 0 12px !important;
+  border-radius: 9999px !important;
+  background: #ffffff !important;
+  color: #3b4a66 !important;
+  border: 1px solid #e6e9f0 !important;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-transform: none !important;
+  letter-spacing: 0.01em !important;
+  gap: 6px !important;
+}
+
+.eco-btn-deepseek:hover {
+  background: #f3f6ff !important;
+  border-color: #d6ddf0 !important;
+  color: #2e3b55 !important;
+}
+
+.eco-btn-deepseek:active {
+  transform: scale(0.98);
+}
+
+.eco-btn-deepseek svg {
+  width: 12px !important;
+  height: 12px !important;
+  color: currentColor !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
