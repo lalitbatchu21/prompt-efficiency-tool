@@ -13,19 +13,23 @@ let pollId: number | null = null;
 let debugLogged = false;
 
 const HOST_ID = "prompt-efficiency-root";
+const GROK_PADDING_ATTRIBUTE = "data-eco-grok-padding";
 
 const HOSTNAME = window.location.hostname;
 const IS_CHATGPT = HOSTNAME === "chatgpt.com" || HOSTNAME.endsWith(".chatgpt.com");
 const IS_GEMINI = HOSTNAME === "gemini.google.com";
 const IS_CLAUDE = HOSTNAME === "claude.ai" || HOSTNAME.endsWith(".claude.ai");
-const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI || IS_CLAUDE;
+const IS_GROK = HOSTNAME === "grok.com" || HOSTNAME.endsWith(".grok.com");
+const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI || IS_CLAUDE || IS_GROK;
 const SITE_LABEL = IS_GEMINI
   ? "Gemini"
   : IS_CHATGPT
     ? "ChatGPT"
     : IS_CLAUDE
       ? "Claude"
-      : "Unknown";
+      : IS_GROK
+        ? "Grok"
+        : "Unknown";
 
 const CHATGPT_TEXTAREA_SELECTORS = [
   'textarea#prompt-textarea',
@@ -174,10 +178,94 @@ function resolveClaudeTarget(): InjectionTarget | null {
   return { parent: wrapper, insertBefore: wrapper.firstChild };
 }
 
+function resolveGrokTarget(): InjectionTarget | null {
+  const modelSelect = querySelectorDeep<HTMLButtonElement>(document, [
+    "button#model-select-trigger",
+    'button[aria-label="Model select"]'
+  ]);
+  if (modelSelect) {
+    const row =
+      modelSelect.closest<HTMLElement>('[class*="ms-auto"][class*="flex"]') ??
+      modelSelect.closest<HTMLElement>('[class*="flex"][class*="gap"]') ??
+      modelSelect.parentElement;
+    if (row) {
+      let anchor: HTMLElement | null = modelSelect;
+      while (anchor && anchor.parentElement !== row) {
+        anchor = anchor.parentElement;
+      }
+      return { parent: row, insertBefore: anchor ?? row.firstChild };
+    }
+  }
+
+  const sendButton = querySelectorDeep<HTMLButtonElement>(document, [
+    'button[aria-label="Submit"]',
+    'button[type="submit"]'
+  ]);
+  if (sendButton) {
+    const container = sendButton.parentElement ?? sendButton;
+    if (container) {
+      container.style.position ||= "relative";
+      container.style.zIndex = "2";
+    }
+    return { parent: container, insertBefore: sendButton };
+  }
+
+  const editor = querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]']);
+  if (!editor) return null;
+  const wrapper = (editor.closest("form") as HTMLElement | null) ?? editor.parentElement;
+  if (!wrapper) return null;
+
+  return { parent: wrapper, insertBefore: wrapper.firstChild };
+}
+
+function findGrokPaddingContainer(row: HTMLElement) {
+  return (
+    row.closest<HTMLElement>('div[style*="padding-inline-end"]') ??
+    row.closest<HTMLElement>('div[style*="padding-right"]') ??
+    row.closest<HTMLElement>('div[class*="ps-"][class*="pe-"]') ??
+    row.closest<HTMLElement>('div[class*="ps-"]')
+  );
+}
+
+function updateGrokPadding(row: HTMLElement, container?: HTMLElement | null) {
+  const target = container ?? findGrokPaddingContainer(row);
+  if (!target) return;
+
+  const rowRect = row.getBoundingClientRect();
+  const containerRect = target.getBoundingClientRect();
+  const rightGap = Math.max(0, Math.ceil(containerRect.right - rowRect.right));
+  const contentWidth = Math.max(Math.ceil(row.scrollWidth), Math.ceil(rowRect.width));
+  const paddingValue = `${Math.max(0, contentWidth + rightGap + 8)}px`;
+
+  target.style.setProperty("padding-inline-end", paddingValue, "important");
+  target.style.setProperty("padding-right", paddingValue, "important");
+}
+
+function ensureGrokPadding(row: HTMLElement) {
+  if (row.dataset.ecoGrokPadding === "true") return;
+  const container = findGrokPaddingContainer(row);
+  if (!container) return;
+  row.dataset.ecoGrokPadding = "true";
+
+  const applyPadding = () => updateGrokPadding(row, container);
+  const schedule = () => requestAnimationFrame(applyPadding);
+  schedule();
+
+  const resizeObserver = new ResizeObserver(() => schedule());
+  resizeObserver.observe(row);
+
+  const mutationObserver = new MutationObserver(() => schedule());
+  mutationObserver.observe(row, { childList: true, subtree: true, attributes: true });
+
+  const containerObserver = new MutationObserver(() => schedule());
+  containerObserver.observe(container, { attributes: true, attributeFilter: ["style", "class"] });
+}
+
 function resolveInjectionTarget(): InjectionTarget | null {
   if (IS_CHATGPT) return resolveChatGPTTarget();
   if (IS_GEMINI) return resolveGeminiTarget();
   if (IS_CLAUDE) return resolveClaudeTarget();
+  if (IS_GROK) return resolveGrokTarget();
   return null;
 }
 
@@ -189,8 +277,8 @@ function handleScan() {
     debugLogged = true;
     const promptEl = IS_GEMINI
       ? findGeminiEditable()
-      : IS_CLAUDE
-        ? querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]'])
+      : IS_CLAUDE || IS_GROK
+        ? querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]', "textarea"])
         : querySelectorDeep<HTMLElement>(document, [
             ...CHATGPT_TEXTAREA_SELECTORS,
             ...CHATGPT_EDITABLE_SELECTORS
@@ -254,10 +342,18 @@ function injectUI(target: InjectionTarget) {
   host.id = HOST_ID;
   host.style.display = "inline-flex";
   host.style.alignItems = "center";
-  host.style.marginLeft = "8px";
+  if (IS_GROK) {
+    host.style.marginRight = "8px";
+    host.style.alignSelf = "center";
+  } else {
+    host.style.marginLeft = "8px";
+  }
   host.style.pointerEvents = "auto";
 
   const parent = target.parent;
+  if (IS_GROK) {
+    ensureGrokPadding(parent);
+  }
   const insertBefore = target.insertBefore ?? null;
   if (insertBefore && insertBefore.parentElement === parent) {
     parent.insertBefore(host, insertBefore);
@@ -265,6 +361,12 @@ function injectUI(target: InjectionTarget) {
     parent.insertBefore(host, parent.firstChild);
   } else {
     parent.appendChild(host);
+  }
+  if (IS_GROK) {
+    requestAnimationFrame(() => {
+      ensureGrokPadding(parent);
+      updateGrokPadding(parent);
+    });
   }
 
   const shadow = host.attachShadow({ mode: "open" });

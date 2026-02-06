@@ -31,3 +31,40 @@
   fill: currentColor !important;
   stroke: currentColor !important;
 }
+
+.eco-btn-grok {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 9999px !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  font-family: "Sohne", system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  gap: 6px !important;
+}
+
+.eco-btn-grok:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.eco-btn-grok:active {
+  transform: scale(0.97);
+}
+
+.eco-btn-grok svg {
+  width: 12px !important;
+  height: 12px !important;
+  color: currentColor !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}

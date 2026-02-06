@@ -8,12 +8,14 @@ import { getStorage } from "../utils/storage";
 const HOSTNAME = window.location.hostname;
 const IS_GEMINI = HOSTNAME === "gemini.google.com";
 const IS_CLAUDE = HOSTNAME.includes("claude.ai");
+const IS_GROK = HOSTNAME === "grok.com" || HOSTNAME.endsWith(".grok.com");
 
 export default function Injection() {
   const lastPromptRef = useRef<string | null>(null);
   const [undoEnabled, setUndoEnabled] = useState(true);
   const [status, setStatus] = useState<"idle" | "success">("idle");
   const [undoSpinning, setUndoSpinning] = useState(false);
+  const statusTimeoutRef = useRef<number | null>(null);
 
   const stopWords = new Set([
     "the",
@@ -55,6 +57,20 @@ export default function Injection() {
     return null;
   };
 
+  const findEditorNearHost = <T extends Element>(selectors: string[]): T | null => {
+    const host = document.getElementById("prompt-efficiency-root");
+    if (!host) return null;
+
+    let node: HTMLElement | null = host;
+    while (node) {
+      const found = querySelectorDeep<T>(node, selectors);
+      if (found && found.id !== "prompt-efficiency-root") return found;
+      node = node.parentElement;
+    }
+
+    return null;
+  };
+
   const getClaudeEditor = (): HTMLElement | null =>
     querySelectorDeep<HTMLElement>(document, [
       'div[contenteditable="true"][role="textbox"]',
@@ -62,6 +78,19 @@ export default function Injection() {
       'div[contenteditable="true"][data-lexical-editor="true"]',
       'div[contenteditable="true"]'
     ]);
+
+  const getGrokEditor = (): HTMLElement | HTMLTextAreaElement | null => {
+    const selectors = [
+      "textarea",
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"][data-slate-editor="true"]',
+      'div[contenteditable="true"][data-lexical-editor="true"]',
+      'div[contenteditable="true"]'
+    ];
+    const scoped = findEditorNearHost<HTMLElement>(selectors);
+    if (scoped) return scoped;
+    return querySelectorDeep<HTMLElement>(document, selectors);
+  };
 
   const readClaudePrompt = () => {
     const editor = getClaudeEditor();
@@ -145,10 +174,110 @@ export default function Injection() {
     }
   };
 
+  const readGrokPrompt = () => {
+    const editor = getGrokEditor();
+    if (!editor) {
+      console.warn("Prompt Efficiency Tool: Grok editor not found");
+      return "";
+    }
+    if (editor instanceof HTMLTextAreaElement) {
+      return editor.value ?? "";
+    }
+    return editor.innerText ?? editor.textContent ?? "";
+  };
+
+  const writeGrokPrompt = (value: string) => {
+    const editor = getGrokEditor();
+    if (!editor) {
+      console.warn("Prompt Efficiency Tool: Grok editor not found");
+      return;
+    }
+
+    if (editor instanceof HTMLTextAreaElement) {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      );
+      const setter = descriptor?.set;
+      if (setter) {
+        setter.call(editor, value);
+      } else {
+        editor.value = value;
+      }
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+      editor.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    try {
+      editor.focus();
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        selection.addRange(range);
+      }
+
+      document.execCommand("selectAll", false);
+      document.execCommand("delete", false);
+
+      if (value.length === 0) {
+        const clearEvent =
+          typeof InputEvent !== "undefined"
+            ? new InputEvent("input", {
+                bubbles: true,
+                cancelable: true,
+                inputType: "deleteContentBackward"
+              })
+            : new Event("input", { bubbles: true });
+        editor.dispatchEvent(clearEvent);
+        return;
+      }
+
+      let updated = false;
+      if (typeof DataTransfer !== "undefined" && typeof ClipboardEvent !== "undefined") {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.setData("text/plain", value);
+        const pasteEvent = new ClipboardEvent("paste", {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: dataTransfer
+        });
+        updated = editor.dispatchEvent(pasteEvent);
+      }
+
+      if (!updated) {
+        document.execCommand("insertText", false, value);
+      }
+
+      const inputEvent =
+        typeof InputEvent !== "undefined"
+          ? new InputEvent("input", {
+              bubbles: true,
+              cancelable: true,
+              inputType: "insertText",
+              data: value
+            })
+          : new Event("input", { bubbles: true });
+      editor.dispatchEvent(inputEvent);
+    } catch {
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
+
   const readPrompt = () =>
-    IS_CLAUDE ? readClaudePrompt() : IS_GEMINI ? getGeminiPromptValue() : getPromptValue();
+    IS_GROK
+      ? readGrokPrompt()
+      : IS_CLAUDE
+        ? readClaudePrompt()
+        : IS_GEMINI
+          ? getGeminiPromptValue()
+          : getPromptValue();
   const writePrompt = (value: string) => {
-    if (IS_CLAUDE) {
+    if (IS_GROK) {
+      writeGrokPrompt(value);
+    } else if (IS_CLAUDE) {
       writeClaudePrompt(value);
     } else if (IS_GEMINI) {
       setGeminiPromptValue(value);
@@ -161,10 +290,18 @@ export default function Injection() {
     const originalText = readPrompt();
     console.log(`Read: ${originalText}`);
     lastPromptRef.current = originalText;
+    if (!originalText.trim()) {
+      setStatus("idle");
+      return;
+    }
 
     const words = originalText.split(/\s+/).filter(Boolean);
     const filtered = words.filter((word) => !stopWords.has(word.toLowerCase()));
     const compressedText = filtered.join(" ");
+    if (compressedText === originalText) {
+      setStatus("idle");
+      return;
+    }
 
     const savings = processSavings(originalText, compressedText);
     console.log(
@@ -180,7 +317,13 @@ export default function Injection() {
     void logEcoStats(savings);
 
     setStatus("success");
-    window.setTimeout(() => setStatus("idle"), 2000);
+    if (statusTimeoutRef.current !== null) {
+      window.clearTimeout(statusTimeoutRef.current);
+    }
+    statusTimeoutRef.current = window.setTimeout(() => {
+      setStatus("idle");
+      statusTimeoutRef.current = null;
+    }, 2000);
   };
 
   useEffect(() => {
@@ -205,6 +348,9 @@ export default function Injection() {
 
     return () => {
       mounted = false;
+      if (statusTimeoutRef.current !== null) {
+        window.clearTimeout(statusTimeoutRef.current);
+      }
       chrome.storage.onChanged.removeListener(listener);
     };
   }, []);
@@ -235,6 +381,7 @@ export default function Injection() {
 
   const geminiClass = IS_GEMINI ? "eco-btn-gemini" : "";
   const claudeClass = IS_CLAUDE ? "eco-btn-claude" : "";
+  const grokClass = IS_GROK ? "eco-btn-grok" : "";
 
   return (
     <div className="pointer-events-auto flex items-center gap-1 pet-fade-in">
@@ -279,7 +426,7 @@ export default function Injection() {
       <div className="relative pet-group">
         <button
           type="button"
-          className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${
+          className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${
             status === "success" ? "text-emerald-400" : "text-zinc-400"
           }`}
           onClick={handleCompress}
@@ -296,7 +443,7 @@ export default function Injection() {
         <div className="relative pet-group">
           <button
             type="button"
-            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass}`}
+            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass}`}
             onClick={() => {
               setUndoSpinning(true);
               window.setTimeout(() => setUndoSpinning(false), 400);

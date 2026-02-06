@@ -31,6 +31,9 @@ export function processSavings(originalText: string, compressedText: string) {
 
 export async function logEcoStats(payload: EcoPayload): Promise<void> {
   const { tokens, waterMl, energyWh } = payload;
+  if (tokens <= 0 && waterMl <= 0 && energyWh <= 0) {
+    return;
+  }
 
   const totals = await new Promise<EcoTotals>((resolve) => {
     chrome.storage.local.get(DEFAULT_TOTALS, (items) => {
@@ -48,8 +51,11 @@ export async function logEcoStats(payload: EcoPayload): Promise<void> {
     totalEnergy: totals.totalEnergy + energyWh
   };
 
+  const bottleMl = 500;
+  const bottlesSaved = nextTotals.totalWater / bottleMl;
+
   await new Promise<void>((resolve) => {
-    chrome.storage.local.set(nextTotals, () => resolve());
+    chrome.storage.local.set({ ...nextTotals, bottlesSaved }, () => resolve());
   });
 
   try {
