@@ -105,3 +105,40 @@
   fill: currentColor !important;
   stroke: currentColor !important;
 }
+
+.eco-btn-perplexity {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 9999px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+  gap: 6px !important;
+}
+
+.eco-btn-perplexity:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.eco-btn-perplexity:active {
+  transform: scale(0.97);
+}
+
+.eco-btn-perplexity svg {
+  width: 12px !important;
+  height: 12px !important;
+  color: currentColor !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}

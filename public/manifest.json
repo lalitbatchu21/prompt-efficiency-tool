@@ -7,7 +7,9 @@
     "https://*.workers.dev/*",
     "https://claude.ai/*",
     "https://grok.com/*",
-    "https://chat.deepseek.com/*"
+    "https://chat.deepseek.com/*",
+    "https://perplexity.ai/*",
+    "https://www.perplexity.ai/*"
   ],
   "action": {
     "default_popup": "popup.html"
@@ -22,7 +24,9 @@
         "https://gemini.google.com/*",
         "https://claude.ai/*",
         "https://grok.com/*",
-        "https://chat.deepseek.com/*"
+        "https://chat.deepseek.com/*",
+        "https://perplexity.ai/*",
+        "https://www.perplexity.ai/*"
       ],
       "js": ["assets/content.js"],
       "run_at": "document_idle"

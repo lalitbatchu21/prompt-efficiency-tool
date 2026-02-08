@@ -21,7 +21,10 @@ const IS_GEMINI = HOSTNAME === "gemini.google.com";
 const IS_CLAUDE = HOSTNAME === "claude.ai" || HOSTNAME.endsWith(".claude.ai");
 const IS_GROK = HOSTNAME === "grok.com" || HOSTNAME.endsWith(".grok.com");
 const IS_DEEPSEEK = HOSTNAME === "chat.deepseek.com";
-const IS_SUPPORTED = IS_CHATGPT || IS_GEMINI || IS_CLAUDE || IS_GROK || IS_DEEPSEEK;
+const IS_PERPLEXITY =
+  HOSTNAME === "perplexity.ai" || HOSTNAME === "www.perplexity.ai";
+const IS_SUPPORTED =
+  IS_CHATGPT || IS_GEMINI || IS_CLAUDE || IS_GROK || IS_DEEPSEEK || IS_PERPLEXITY;
 const SITE_LABEL = IS_GEMINI
   ? "Gemini"
   : IS_CHATGPT
@@ -32,7 +35,9 @@ const SITE_LABEL = IS_GEMINI
         ? "Grok"
         : IS_DEEPSEEK
           ? "DeepSeek"
-          : "Unknown";
+          : IS_PERPLEXITY
+            ? "Perplexity"
+            : "Unknown";
 
 const CHATGPT_TEXTAREA_SELECTORS = [
   'textarea#prompt-textarea',
@@ -222,8 +227,10 @@ function resolveGrokTarget(): InjectionTarget | null {
 }
 
 function resolveDeepSeekTarget(): InjectionTarget | null {
-  const editor = querySelectorDeep<HTMLTextAreaElement>(document, [
+  const editor = querySelectorDeep<HTMLElement>(document, [
     'textarea[placeholder*="DeepSeek"]',
+    'div[contenteditable="true"][aria-label*="DeepSeek"]',
+    'div[contenteditable="true"]',
     "textarea"
   ]);
   if (editor) {
@@ -232,8 +239,7 @@ function resolveDeepSeekTarget(): InjectionTarget | null {
       const hasIcon = scope.querySelector(
         'div[class*="ds-icon-button--sizing-container"]'
       );
-      const hasToggle = scope.querySelector('div[class*="ds-toggle-button"]');
-      if (hasIcon && hasToggle) break;
+      if (hasIcon) break;
       scope = scope.parentElement;
     }
     if (scope) {
@@ -288,6 +294,50 @@ function resolveDeepSeekTarget(): InjectionTarget | null {
   return { parent: wrapper, insertBefore: wrapper.firstChild };
 }
 
+function resolvePerplexityTarget(): InjectionTarget | null {
+  const dictationButton = querySelectorDeep<HTMLButtonElement>(document, [
+    'button[aria-label="Dictation"]',
+    'button[aria-label*="Dictation"]'
+  ]);
+  if (dictationButton) {
+    const wrapper =
+      dictationButton.closest<HTMLElement>("div.relative") ??
+      dictationButton.parentElement ??
+      dictationButton;
+    const row = wrapper.parentElement ?? wrapper;
+    if (row && row !== wrapper) {
+      return { parent: row, insertBefore: wrapper };
+    }
+    return { parent: wrapper, insertBefore: dictationButton };
+  }
+
+  const sendButton = querySelectorDeep<HTMLButtonElement>(document, [
+    'button[aria-label*="Send"]',
+    'button[type="submit"]'
+  ]);
+  if (sendButton) {
+    const wrapper =
+      sendButton.closest<HTMLElement>("div.relative") ??
+      sendButton.parentElement ??
+      sendButton;
+    const row = wrapper.parentElement ?? wrapper;
+    if (row && row !== wrapper) {
+      return { parent: row, insertBefore: wrapper };
+    }
+    return { parent: wrapper, insertBefore: sendButton };
+  }
+
+  const editor = querySelectorDeep<HTMLElement>(document, [
+    "textarea",
+    'div[contenteditable="true"]'
+  ]);
+  if (!editor) return null;
+  const wrapper = (editor.closest("form") as HTMLElement | null) ?? editor.parentElement;
+  if (!wrapper) return null;
+
+  return { parent: wrapper, insertBefore: wrapper.firstChild };
+}
+
 function findGrokPaddingContainer(row: HTMLElement) {
   return (
     row.closest<HTMLElement>('div[style*="padding-inline-end"]') ??
@@ -337,6 +387,7 @@ function resolveInjectionTarget(): InjectionTarget | null {
   if (IS_CLAUDE) return resolveClaudeTarget();
   if (IS_GROK) return resolveGrokTarget();
   if (IS_DEEPSEEK) return resolveDeepSeekTarget();
+  if (IS_PERPLEXITY) return resolvePerplexityTarget();
   return null;
 }
 
@@ -348,7 +399,7 @@ function handleScan() {
     debugLogged = true;
     const promptEl = IS_GEMINI
       ? findGeminiEditable()
-      : IS_CLAUDE || IS_GROK || IS_DEEPSEEK
+      : IS_CLAUDE || IS_GROK || IS_DEEPSEEK || IS_PERPLEXITY
         ? querySelectorDeep<HTMLElement>(document, ['div[contenteditable="true"]', "textarea"])
         : querySelectorDeep<HTMLElement>(document, [
             ...CHATGPT_TEXTAREA_SELECTORS,
@@ -414,6 +465,10 @@ function injectUI(target: InjectionTarget) {
   host.style.display = "inline-flex";
   host.style.alignItems = "center";
   if (IS_GROK) {
+    host.style.marginRight = "8px";
+    host.style.alignSelf = "center";
+  } else if (IS_PERPLEXITY) {
+    host.style.marginLeft = "0";
     host.style.marginRight = "8px";
     host.style.alignSelf = "center";
   } else if (IS_DEEPSEEK) {

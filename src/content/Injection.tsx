@@ -10,9 +10,12 @@ const IS_GEMINI = HOSTNAME === "gemini.google.com";
 const IS_CLAUDE = HOSTNAME.includes("claude.ai");
 const IS_GROK = HOSTNAME === "grok.com" || HOSTNAME.endsWith(".grok.com");
 const IS_DEEPSEEK = HOSTNAME === "chat.deepseek.com";
+const IS_PERPLEXITY =
+  HOSTNAME === "perplexity.ai" || HOSTNAME === "www.perplexity.ai";
 
 export default function Injection() {
-  const lastPromptRef = useRef<string | null>(null);
+  const undoStackRef = useRef<string[]>([]);
+  const lastFocusedEditorRef = useRef<HTMLElement | HTMLTextAreaElement | null>(null);
   const [undoEnabled, setUndoEnabled] = useState(true);
   const [status, setStatus] = useState<"idle" | "success">("idle");
   const [undoSpinning, setUndoSpinning] = useState(false);
@@ -58,6 +61,14 @@ export default function Injection() {
     return null;
   };
 
+  const isElementVisible = (element: Element | null): element is HTMLElement => {
+    if (!(element instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+
   const findEditorNearHost = <T extends Element>(selectors: string[]): T | null => {
     const host = document.getElementById("prompt-efficiency-root");
     if (!host) return null;
@@ -70,6 +81,13 @@ export default function Injection() {
     }
 
     return null;
+  };
+
+  const matchesEditable = (node: EventTarget | null): node is HTMLElement => {
+    if (!(node instanceof HTMLElement)) return false;
+    if (node.tagName === "TEXTAREA") return true;
+    if (node.classList.contains("ProseMirror")) return true;
+    return node.isContentEditable;
   };
 
   const getClaudeEditor = (): HTMLElement | null =>
@@ -95,6 +113,74 @@ export default function Injection() {
 
   const getDeepSeekEditor = (): HTMLElement | HTMLTextAreaElement | null => {
     const selectors = [
+      "textarea",
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"]'
+    ];
+    const scoped = findEditorNearHost<HTMLElement>(selectors);
+    if (scoped) return scoped;
+    return querySelectorDeep<HTMLElement>(document, selectors);
+  };
+
+  const getPerplexityEditor = (): HTMLElement | HTMLTextAreaElement | null => {
+    const selection = window.getSelection();
+    const anchorNode = selection?.anchorNode;
+    const anchorElement =
+      anchorNode instanceof HTMLElement
+        ? anchorNode
+        : anchorNode?.parentElement ?? null;
+    const fromSelection = anchorElement?.closest<HTMLElement>(
+      '#ask-input[contenteditable="true"], div[data-lexical-editor="true"][contenteditable="true"], div[contenteditable="true"][role="textbox"], div[contenteditable="true"]'
+    );
+    if (fromSelection && isElementVisible(fromSelection)) {
+      return fromSelection;
+    }
+
+    const askInput = document.getElementById("ask-input");
+    if (
+      askInput instanceof HTMLElement &&
+      askInput.isContentEditable &&
+      isElementVisible(askInput)
+    ) {
+      return askInput;
+    }
+
+    if (matchesEditable(document.activeElement) && isElementVisible(document.activeElement)) {
+      return document.activeElement;
+    }
+
+    if (lastFocusedEditorRef.current?.isConnected && isElementVisible(lastFocusedEditorRef.current)) {
+      return lastFocusedEditorRef.current;
+    }
+
+    const lexicalById = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '#ask-input[data-lexical-editor="true"][contenteditable="true"]'
+      )
+    ).find(isElementVisible);
+    if (lexicalById) return lexicalById;
+
+    const lexicalGeneric = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'div[data-lexical-editor="true"][contenteditable="true"]'
+      )
+    ).find(isElementVisible);
+    if (lexicalGeneric) return lexicalGeneric;
+
+    const lexicalByIdAny = document.querySelector<HTMLElement>(
+      '#ask-input[data-lexical-editor="true"][contenteditable="true"]'
+    );
+    if (lexicalByIdAny) return lexicalByIdAny;
+
+    const lexicalGenericAny = document.querySelector<HTMLElement>(
+      'div[data-lexical-editor="true"][contenteditable="true"]'
+    );
+    if (lexicalGenericAny) return lexicalGenericAny;
+
+    const selectors = [
+      ".ProseMirror",
+      '#ask-input[contenteditable="true"]',
+      'div[data-lexical-editor="true"][contenteditable="true"]',
       "textarea",
       'div[contenteditable="true"][role="textbox"]',
       'div[contenteditable="true"]'
@@ -202,6 +288,18 @@ export default function Injection() {
     const editor = getDeepSeekEditor();
     if (!editor) {
       console.warn("Prompt Efficiency Tool: DeepSeek editor not found");
+      return "";
+    }
+    if (editor instanceof HTMLTextAreaElement) {
+      return editor.value ?? "";
+    }
+    return editor.innerText ?? editor.textContent ?? "";
+  };
+
+  const readPerplexityPrompt = () => {
+    const editor = getPerplexityEditor();
+    if (!editor) {
+      console.warn("Prompt Efficiency Tool: Perplexity editor not found");
       return "";
     }
     if (editor instanceof HTMLTextAreaElement) {
@@ -355,11 +453,170 @@ export default function Injection() {
     }
   };
 
+  const writePerplexityPrompt = (value: string) => {
+    const editor = getPerplexityEditor();
+    if (!editor) {
+      console.warn("Prompt Efficiency Tool: Perplexity editor not found");
+      return;
+    }
+
+    if (editor instanceof HTMLTextAreaElement) {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      );
+      const setter = descriptor?.set;
+      if (setter) {
+        setter.call(editor, value);
+      } else {
+        editor.value = value;
+      }
+      const inputEvent =
+        typeof InputEvent !== "undefined"
+          ? new InputEvent("input", {
+              bubbles: true,
+              cancelable: true,
+              inputType: "insertText",
+              data: value
+            })
+          : new Event("input", { bubbles: true });
+      editor.dispatchEvent(inputEvent);
+      editor.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+    const escapeHtml = (text: string) =>
+      text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    const expected = normalize(value);
+    const current = () => normalize(editor.innerText ?? editor.textContent ?? "");
+    const selectAll = (): boolean => {
+      editor.focus();
+      const selection = window.getSelection();
+      if (!selection) return false;
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    };
+    const ensureFullEditorSelection = (): boolean => {
+      editor.focus();
+      document.execCommand("selectAll", false);
+      const selectedViaCommand = normalize(window.getSelection()?.toString() ?? "");
+      const currentText = current();
+      if (currentText.length === 0 || selectedViaCommand === currentText) return true;
+
+      if (!selectAll()) return false;
+      const selectedViaRange = normalize(window.getSelection()?.toString() ?? "");
+      return currentText.length === 0 || selectedViaRange === currentText;
+    };
+    const replaceWithExec = (): boolean => {
+      if (!ensureFullEditorSelection()) return false;
+      if (value.length === 0) {
+        if (typeof InputEvent !== "undefined") {
+          editor.dispatchEvent(
+            new InputEvent("beforeinput", {
+              bubbles: true,
+              cancelable: true,
+              inputType: "deleteByCut"
+            })
+          );
+        }
+        const deleted = document.execCommand("delete", false);
+        if (typeof InputEvent !== "undefined") {
+          editor.dispatchEvent(
+            new InputEvent("input", {
+              bubbles: true,
+              cancelable: true,
+              inputType: "deleteContentBackward"
+            })
+          );
+        } else {
+          editor.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        editor.dispatchEvent(new Event("change", { bubbles: true }));
+        return deleted;
+      }
+      return document.execCommand("insertText", false, value);
+    };
+    const replaceWithDomFallback = () => {
+      editor.innerHTML = "";
+      const paragraph = document.createElement("p");
+      paragraph.setAttribute("dir", "auto");
+      if (value.length === 0) {
+        paragraph.appendChild(document.createElement("br"));
+      } else {
+        const span = document.createElement("span");
+        span.setAttribute("data-lexical-text", "true");
+        span.innerHTML = escapeHtml(value);
+        paragraph.appendChild(span);
+      }
+      editor.appendChild(paragraph);
+      if (typeof InputEvent !== "undefined") {
+        editor.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            cancelable: true,
+            inputType:
+              value.length === 0 ? "deleteContentBackward" : "insertReplacementText",
+            data: value.length === 0 ? null : value
+          })
+        );
+      } else {
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      editor.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const moveCaretToEnd = () => {
+      const selection = window.getSelection();
+      if (!selection) return;
+      const newRange = document.createRange();
+      newRange.selectNodeContents(editor);
+      newRange.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+    };
+
+    try {
+      editor.focus();
+      const replaced = replaceWithExec();
+
+      if (current() !== expected) {
+        replaceWithDomFallback();
+      }
+      moveCaretToEnd();
+
+      // Lexical can reconcile asynchronously; re-check on the next frame.
+      requestAnimationFrame(() => {
+        if (current() === expected) return;
+        replaceWithDomFallback();
+        moveCaretToEnd();
+        if (current() !== expected) {
+          console.warn("Prompt Efficiency Tool: Perplexity write mismatch", {
+            replaced,
+            expectedLength: expected.length,
+            actualLength: current().length
+          });
+        }
+      });
+    } catch (error) {
+      console.error("Prompt Efficiency Tool: Failed to write Perplexity prompt", error);
+    }
+  };
+
   const readPrompt = () =>
     IS_GROK
       ? readGrokPrompt()
       : IS_DEEPSEEK
         ? readDeepSeekPrompt()
+        : IS_PERPLEXITY
+          ? readPerplexityPrompt()
         : IS_CLAUDE
           ? readClaudePrompt()
           : IS_GEMINI
@@ -370,6 +627,8 @@ export default function Injection() {
       writeGrokPrompt(value);
     } else if (IS_DEEPSEEK) {
       writeDeepSeekPrompt(value);
+    } else if (IS_PERPLEXITY) {
+      writePerplexityPrompt(value);
     } else if (IS_CLAUDE) {
       writeClaudePrompt(value);
     } else if (IS_GEMINI) {
@@ -379,10 +638,19 @@ export default function Injection() {
     }
   };
 
+  const pushUndoSnapshot = (prompt: string) => {
+    const stack = undoStackRef.current;
+    if (stack[stack.length - 1] !== prompt) {
+      stack.push(prompt);
+    }
+    if (stack.length > 20) {
+      stack.shift();
+    }
+  };
+
   const handleCompress = () => {
     const originalText = readPrompt();
     console.log(`Read: ${originalText}`);
-    lastPromptRef.current = originalText;
     if (!originalText.trim()) {
       setStatus("idle");
       return;
@@ -395,6 +663,8 @@ export default function Injection() {
       setStatus("idle");
       return;
     }
+
+    pushUndoSnapshot(originalText);
 
     const savings = processSavings(originalText, compressedText);
     console.log(
@@ -449,6 +719,26 @@ export default function Injection() {
   }, []);
 
   useEffect(() => {
+    if (!IS_PERPLEXITY) return;
+
+    const handleFocus = (event: FocusEvent) => {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      for (const item of path) {
+        if (matchesEditable(item)) {
+          lastFocusedEditorRef.current = item as HTMLElement;
+          return;
+        }
+      }
+      if (matchesEditable(event.target)) {
+        lastFocusedEditorRef.current = event.target as HTMLElement;
+      }
+    };
+
+    document.addEventListener("focusin", handleFocus, true);
+    return () => document.removeEventListener("focusin", handleFocus, true);
+  }, []);
+
+  useEffect(() => {
     if (!IS_CLAUDE) return;
 
     const host = document.getElementById("prompt-efficiency-root");
@@ -476,6 +766,7 @@ export default function Injection() {
   const claudeClass = IS_CLAUDE ? "eco-btn-claude" : "";
   const grokClass = IS_GROK ? "eco-btn-grok" : "";
   const deepseekClass = IS_DEEPSEEK ? "eco-btn-deepseek" : "";
+  const perplexityClass = IS_PERPLEXITY ? "eco-btn-perplexity" : "";
   const showCustomTooltip = !IS_DEEPSEEK;
 
   return (
@@ -530,7 +821,7 @@ export default function Injection() {
           type="button"
           className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${deepseekClass} ${
             status === "success" ? "text-emerald-400" : "text-zinc-400"
-          }`}
+          } ${perplexityClass}`}
           onClick={handleCompress}
           title="Compress prompt"
         >
@@ -548,14 +839,15 @@ export default function Injection() {
         <div className="relative pet-group">
           <button
             type="button"
-            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${deepseekClass}`}
+            className={`pet-ghost inline-flex items-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 transition-all duration-200 ease-in-out hover:bg-white/10 hover:text-zinc-100 active:scale-90 transition-transform duration-100 ${geminiClass} ${claudeClass} ${grokClass} ${deepseekClass} ${perplexityClass}`}
             onClick={() => {
               setUndoSpinning(true);
               window.setTimeout(() => setUndoSpinning(false), 400);
-              const previous = lastPromptRef.current;
+              const previous = undoStackRef.current.pop() ?? null;
               if (previous !== null) {
                 console.log("Undo: restoring previous prompt");
                 writePrompt(previous);
+                setStatus("idle");
                 return;
               }
 
