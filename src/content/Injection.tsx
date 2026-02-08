@@ -486,13 +486,6 @@ export default function Injection() {
     }
 
     const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
-    const escapeHtml = (text: string) =>
-      text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
     const expected = normalize(value);
     const current = () => normalize(editor.innerText ?? editor.textContent ?? "");
     const selectAll = (): boolean => {
@@ -516,8 +509,27 @@ export default function Injection() {
       const selectedViaRange = normalize(window.getSelection()?.toString() ?? "");
       return currentText.length === 0 || selectedViaRange === currentText;
     };
-    const replaceWithExec = (): boolean => {
+    const dispatchInput = (inputType: string, data: string | null) => {
+      if (typeof InputEvent !== "undefined") {
+        editor.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            cancelable: true,
+            inputType,
+            data
+          })
+        );
+      } else {
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      editor.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const replaceWithPaste = (): boolean => {
       if (!ensureFullEditorSelection()) return false;
+      if (typeof DataTransfer === "undefined" || typeof ClipboardEvent === "undefined") {
+        return false;
+      }
+
       if (value.length === 0) {
         if (typeof InputEvent !== "undefined") {
           editor.dispatchEvent(
@@ -529,49 +541,70 @@ export default function Injection() {
           );
         }
         const deleted = document.execCommand("delete", false);
-        if (typeof InputEvent !== "undefined") {
-          editor.dispatchEvent(
-            new InputEvent("input", {
-              bubbles: true,
-              cancelable: true,
-              inputType: "deleteContentBackward"
-            })
-          );
-        } else {
-          editor.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-        editor.dispatchEvent(new Event("change", { bubbles: true }));
+        dispatchInput("deleteContentBackward", null);
         return deleted;
       }
-      return document.execCommand("insertText", false, value);
-    };
-    const replaceWithDomFallback = () => {
-      editor.innerHTML = "";
-      const paragraph = document.createElement("p");
-      paragraph.setAttribute("dir", "auto");
-      if (value.length === 0) {
-        paragraph.appendChild(document.createElement("br"));
-      } else {
-        const span = document.createElement("span");
-        span.setAttribute("data-lexical-text", "true");
-        span.innerHTML = escapeHtml(value);
-        paragraph.appendChild(span);
-      }
-      editor.appendChild(paragraph);
+
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/plain", value);
       if (typeof InputEvent !== "undefined") {
         editor.dispatchEvent(
-          new InputEvent("input", {
+          new InputEvent("beforeinput", {
             bubbles: true,
             cancelable: true,
-            inputType:
-              value.length === 0 ? "deleteContentBackward" : "insertReplacementText",
-            data: value.length === 0 ? null : value
+            inputType: "insertFromPaste",
+            data: value
           })
         );
-      } else {
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      editor.dispatchEvent(new Event("change", { bubbles: true }));
+      const pasteEvent = new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dataTransfer
+      });
+      return editor.dispatchEvent(pasteEvent);
+    };
+    const replaceWithExec = (): boolean => {
+      if (!ensureFullEditorSelection()) return false;
+      if (typeof InputEvent !== "undefined") {
+        editor.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: true,
+            inputType: "deleteByCut"
+          })
+        );
+      }
+      const deleted = document.execCommand("delete", false);
+
+      if (value.length === 0) {
+        dispatchInput("deleteContentBackward", null);
+        return deleted;
+      }
+
+      // Ensure insertion starts from an empty editor to prevent accidental appends.
+      const selection = window.getSelection();
+      if (selection) {
+        const startRange = document.createRange();
+        startRange.selectNodeContents(editor);
+        startRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(startRange);
+      }
+
+      if (typeof InputEvent !== "undefined") {
+        editor.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: true,
+            inputType: "insertText",
+            data: value
+          })
+        );
+      }
+      const inserted = document.execCommand("insertText", false, value);
+      dispatchInput("insertText", value);
+      return inserted;
     };
     const moveCaretToEnd = () => {
       const selection = window.getSelection();
@@ -585,25 +618,24 @@ export default function Injection() {
 
     try {
       editor.focus();
-      const replaced = replaceWithExec();
-
-      if (current() !== expected) {
-        replaceWithDomFallback();
-      }
+      const replacedWithPaste = replaceWithPaste();
       moveCaretToEnd();
 
       // Lexical can reconcile asynchronously; re-check on the next frame.
       requestAnimationFrame(() => {
         if (current() === expected) return;
-        replaceWithDomFallback();
+        const replacedWithExec = replaceWithExec();
         moveCaretToEnd();
-        if (current() !== expected) {
-          console.warn("Prompt Efficiency Tool: Perplexity write mismatch", {
-            replaced,
-            expectedLength: expected.length,
-            actualLength: current().length
-          });
-        }
+        requestAnimationFrame(() => {
+          if (current() !== expected) {
+            console.warn("Prompt Efficiency Tool: Perplexity write mismatch", {
+              replacedWithPaste,
+              replacedWithExec,
+              expectedLength: expected.length,
+              actualLength: current().length
+            });
+          }
+        });
       });
     } catch (error) {
       console.error("Prompt Efficiency Tool: Failed to write Perplexity prompt", error);
@@ -642,10 +674,85 @@ export default function Injection() {
     const stack = undoStackRef.current;
     if (stack[stack.length - 1] !== prompt) {
       stack.push(prompt);
+      console.log("Undo stack: snapshot pushed", {
+        depth: stack.length,
+        promptLength: prompt.length
+      });
+    } else {
+      console.log("Undo stack: duplicate snapshot skipped", {
+        depth: stack.length,
+        promptLength: prompt.length
+      });
     }
     if (stack.length > 20) {
       stack.shift();
+      console.log("Undo stack: oldest snapshot dropped", { depth: stack.length });
     }
+  };
+
+  const normalizePromptText = (value: string) => value.replace(/\s+/g, " ").trim();
+
+  const verifyPromptText = (expected: string, stage: string) => {
+    const actual = normalizePromptText(readPrompt());
+    const expectedNormalized = normalizePromptText(expected);
+    const matches = actual === expectedNormalized;
+    console.log("Undo verify", {
+      stage,
+      matches,
+      expectedLength: expectedNormalized.length,
+      actualLength: actual.length,
+      expected: expectedNormalized,
+      actual
+    });
+    return matches;
+  };
+
+  const handleUndo = () => {
+    const stack = undoStackRef.current;
+    const previous = stack[stack.length - 1] ?? null;
+    console.log("Undo: requested", {
+      depth: stack.length,
+      hasSnapshot: previous !== null
+    });
+
+    if (previous === null) {
+      const current = readPrompt();
+      if (current.endsWith(" [Verified]")) {
+        const restored = current.replace(/\\s\\[Verified\\]$/, "");
+        console.log("Undo: stripping verified suffix");
+        writePrompt(restored);
+      } else {
+        console.log("Undo: no previous prompt captured");
+      }
+      return;
+    }
+
+    writePrompt(previous);
+
+    const completeRestore = (stage: string) => {
+      if (!verifyPromptText(previous, stage)) return false;
+      stack.pop();
+      setStatus("idle");
+      console.log("Undo: restored previous prompt", {
+        depth: stack.length,
+        stage
+      });
+      return true;
+    };
+
+    if (completeRestore("immediate")) return;
+
+    requestAnimationFrame(() => {
+      if (completeRestore("raf")) return;
+      console.log("Undo: retrying restore after raf mismatch");
+      writePrompt(previous);
+      window.setTimeout(() => {
+        if (completeRestore("timeout-120ms")) return;
+        console.warn("Undo: restore failed, keeping snapshot for retry", {
+          depth: stack.length
+        });
+      }, 120);
+    });
   };
 
   const handleCompress = () => {
@@ -677,6 +784,11 @@ export default function Injection() {
     );
 
     writePrompt(compressedText);
+    console.log("Compress: write requested", {
+      stackDepth: undoStackRef.current.length,
+      originalLength: originalText.length,
+      compressedLength: compressedText.length
+    });
     void logEcoStats(savings);
 
     setStatus("success");
@@ -843,22 +955,7 @@ export default function Injection() {
             onClick={() => {
               setUndoSpinning(true);
               window.setTimeout(() => setUndoSpinning(false), 400);
-              const previous = undoStackRef.current.pop() ?? null;
-              if (previous !== null) {
-                console.log("Undo: restoring previous prompt");
-                writePrompt(previous);
-                setStatus("idle");
-                return;
-              }
-
-              const current = readPrompt();
-              if (current.endsWith(" [Verified]")) {
-                const restored = current.replace(/\\s\\[Verified\\]$/, "");
-                console.log("Undo: stripping verified suffix");
-                writePrompt(restored);
-              } else {
-                console.log("Undo: no previous prompt captured");
-              }
+              handleUndo();
             }}
             title="Restore last prompt"
           >
